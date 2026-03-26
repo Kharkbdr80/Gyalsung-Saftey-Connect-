@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-[#F8F9FA] text-slate-900;
+  }
+}
+
+.recharts-cartesian-grid-horizontal line {
+  stroke: #f1f5f9;
+}
+
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}

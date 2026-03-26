@@ -1,0 +1,220 @@
+{
+  "entities": {
+    "Academy": {
+      "title": "Academy",
+      "description": "A training academy or headquarters unit",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the academy"
+        },
+        "logo": {
+          "type": "string",
+          "description": "URL or base64 of the academy logo"
+        }
+      },
+      "required": ["name"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A system user with specific roles",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of the user"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["HQ_ADMIN", "ACADEMY_STAFF", "STUDENT", "ERT"],
+          "description": "Role of the user in the system"
+        },
+        "academy_id": {
+          "type": "string",
+          "description": "ID of the academy the user belongs to"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email address of the user"
+        }
+      },
+      "required": ["name", "role", "academy_id"]
+    },
+    "Incident": {
+      "title": "Incident",
+      "description": "A reported safety incident",
+      "type": "object",
+      "properties": {
+        "academy_id": {
+          "type": "string",
+          "description": "ID of the academy where the incident occurred"
+        },
+        "reporter_id": {
+          "type": "string",
+          "description": "ID of the user who reported the incident"
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of incident"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["Low", "Medium", "High", "Critical"],
+          "description": "Severity level of the incident"
+        },
+        "location": {
+          "type": "string",
+          "description": "Specific location of the incident"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of what happened"
+        },
+        "immediate_action": {
+          "type": "string",
+          "description": "Actions taken immediately after the incident"
+        },
+        "ga_recommendation": {
+          "type": "string",
+          "description": "Recommendations from the Academy Staff"
+        },
+        "ghq_recommendation": {
+          "type": "string",
+          "description": "Recommendations from GHQ"
+        },
+        "photo": {
+          "type": "string",
+          "description": "Base64 encoded image or URL"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Open", "In Progress", "Resolved", "Closed"],
+          "description": "Current status of the incident"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the incident was reported"
+        }
+      },
+      "required": ["academy_id", "reporter_id", "type", "severity", "location", "description", "status", "created_at"]
+    },
+    "Action": {
+      "title": "Action",
+      "description": "A follow-up action for an incident",
+      "type": "object",
+      "properties": {
+        "incident_id": {
+          "type": "string",
+          "description": "ID of the related incident"
+        },
+        "assignee_id": {
+          "type": "string",
+          "description": "ID of the user assigned to the action"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the action to be taken"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Pending", "Completed"],
+          "description": "Current status of the action"
+        },
+        "due_date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Deadline for the action"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the action was completed"
+        }
+      },
+      "required": ["incident_id", "assignee_id", "description", "status", "due_date"]
+    },
+    "Inspection": {
+      "title": "Inspection",
+      "description": "A safety inspection record",
+      "type": "object",
+      "properties": {
+        "academy_id": {
+          "type": "string",
+          "description": "ID of the academy inspected"
+        },
+        "inspector_id": {
+          "type": "string",
+          "description": "ID of the user who performed the inspection"
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the inspection"
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the inspection"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the inspection was performed"
+        }
+      },
+      "required": ["academy_id", "inspector_id", "title", "status", "created_at"]
+    },
+    "KnowledgeItem": {
+      "title": "KnowledgeItem",
+      "description": "An item in the safety knowledge base",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Title of the knowledge item"
+        },
+        "content": {
+          "type": "string",
+          "description": "Content of the knowledge item"
+        },
+        "incident_type": {
+          "type": "string",
+          "description": "Related incident type"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the item was created"
+        }
+      },
+      "required": ["title", "content", "created_at"]
+    }
+  },
+  "firestore": {
+    "/academies": {
+      "schema": "Academy",
+      "description": "Collection of training academies"
+    },
+    "/users": {
+      "schema": "User",
+      "description": "Collection of system users"
+    },
+    "/incidents": {
+      "schema": "Incident",
+      "description": "Collection of safety incidents"
+    },
+    "/actions": {
+      "schema": "Action",
+      "description": "Collection of follow-up actions"
+    },
+    "/inspections": {
+      "schema": "Inspection",
+      "description": "Collection of safety inspections"
+    },
+    "/knowledge_base": {
+      "schema": "KnowledgeItem",
+      "description": "Collection of knowledge base items"
+    }
+  }
+}

@@ -1,0 +1,220 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: academies
+    // Fields:
+    //   - name: string (required)
+    //
+    // Collection: users
+    // Fields:
+    //   - name: string (required)
+    //   - role: string (required, ['HQ_ADMIN', 'ACADEMY_STAFF', 'STUDENT', 'ERT'])
+    //   - academy_id: string (required)
+    //   - email: string (optional)
+    //
+    // Collection: incidents
+    // Fields:
+    //   - academy_id: string (required)
+    //   - reporter_id: string (required)
+    //   - type: string (required)
+    //   - severity: string (required, ['Low', 'Medium', 'High', 'Critical'])
+    //   - location: string (required)
+    //   - description: string (required)
+    //   - immediate_action: string (optional)
+    //   - ga_recommendation: string (optional)
+    //   - ghq_recommendation: string (optional)
+    //   - photo: string (optional)
+    //   - status: string (required, ['Open', 'In Progress', 'Resolved', 'Closed'])
+    //   - created_at: timestamp (required)
+    //
+    // Collection: actions
+    // Fields:
+    //   - incident_id: string (required)
+    //   - assignee_id: string (required)
+    //   - description: string (required)
+    //   - status: string (required, ['Pending', 'Completed'])
+    //   - due_date: timestamp (required)
+    //   - completed_at: timestamp (optional)
+    //
+    // Collection: inspections
+    // Fields:
+    //   - academy_id: string (required)
+    //   - inspector_id: string (required)
+    //   - title: string (required)
+    //   - status: string (required)
+    //   - created_at: timestamp (required)
+    //
+    // Collection: knowledge_base
+    // Fields:
+    //   - title: string (required)
+    //   - content: string (required)
+    //   - incident_type: string (optional)
+    //   - created_at: timestamp (required)
+    //
+    // Collection: notifications
+    // Fields:
+    //   - user_id: string (required)
+    //   - title: string (required)
+    //   - message: string (required)
+    //   - type: string (required, ['recommendation', 'status_change', 'action_assigned'])
+    //   - related_id: string (required)
+    //   - read: bool (required)
+    //   - created_at: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'HQ_ADMIN' ||
+          (request.auth.token.email == "kharkabdr80@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isAcademyStaff(academyId) {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ACADEMY_STAFF' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.academy_id == academyId;
+    }
+
+    function isERT() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ERT';
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidAcademy(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100;
+    }
+
+    function isValidUser(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role in ['HQ_ADMIN', 'ACADEMY_STAFF', 'STUDENT', 'ERT'] &&
+             data.academy_id is string &&
+             (!('email' in data) || isValidEmail(data.email));
+    }
+
+    function isValidIncident(data) {
+      return data.academy_id is string &&
+             data.reporter_id is string &&
+             data.type is string && data.type.size() > 0 && data.type.size() < 100 &&
+             data.severity in ['Low', 'Medium', 'High', 'Critical'] &&
+             data.location is string && data.location.size() > 0 && data.location.size() < 200 &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 2000 &&
+             data.status in ['Open', 'In Progress', 'Resolved', 'Closed'] &&
+             data.created_at is timestamp &&
+             (!('updated_at' in data) || data.updated_at is timestamp) &&
+             (!('academy_name' in data) || data.academy_name is string) &&
+             (!('reporter_name' in data) || data.reporter_name is string) &&
+             (!('photo' in data) || (data.photo is string && data.photo.size() < 1048576));
+    }
+
+    function isValidAction(data) {
+      return data.incident_id is string &&
+             data.assignee_id is string &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 1000 &&
+             data.status in ['Pending', 'Completed'] &&
+             data.due_date is timestamp;
+    }
+
+    function isValidInspection(data) {
+      return data.academy_id is string &&
+             data.inspector_id is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.status is string &&
+             data.created_at is timestamp;
+    }
+
+    function isValidKnowledge(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 5000 &&
+             data.created_at is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.user_id is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 1000 &&
+             data.type in ['recommendation', 'status_change', 'action_assigned'] &&
+             data.related_id is string &&
+             data.read is bool &&
+             data.created_at is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /academies/{academyId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
+    }
+
+    match /incidents/{incidentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidIncident(request.resource.data);
+      allow update: if isAuthenticated() && isValidIncident(request.resource.data) &&
+                    (isAdmin() || isAcademyStaff(resource.data.academy_id) || isERT() || isOwner(resource.data.reporter_id));
+    }
+
+    match /actions/{actionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAction(request.resource.data) && (isAdmin() || isAcademyStaff(request.resource.data.academy_id));
+      allow update: if isAuthenticated() && isValidAction(request.resource.data) && (isAdmin() || isOwner(resource.data.assignee_id));
+    }
+
+    match /inspections/{inspectionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidInspection(request.resource.data);
+      allow update: if isAdmin();
+    }
+
+    match /knowledge_base/{itemId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && isOwner(resource.data.user_id);
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data);
+      allow update: if isAuthenticated() && isOwner(resource.data.user_id) && isValidNotification(request.resource.data);
+      allow delete: if isAuthenticated() && isOwner(resource.data.user_id);
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

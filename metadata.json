@@ -1,0 +1,8 @@
+{
+  "name": "Gyalsung Safety Connect",
+  "description": "A comprehensive safety reporting and management system for Gyalsung Academies and GHQ, featuring real-time incident notifications and recommendations.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
