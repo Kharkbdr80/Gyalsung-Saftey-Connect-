@@ -12,7 +12,7 @@ service cloud.firestore {
     // Collection: users
     // Fields:
     //   - name: string (required)
-    //   - role: string (required, ['HQ_ADMIN', 'ACADEMY_STAFF', 'STUDENT', 'ERT'])
+    //   - role: string (required, ['HQ_ADMIN', 'ACADEMY_STAFF', 'REPORTER', 'ERT'])
     //   - academy_id: string (required)
     //   - email: string (optional)
     //
@@ -40,21 +40,6 @@ service cloud.firestore {
     //   - due_date: timestamp (required)
     //   - completed_at: timestamp (optional)
     //
-    // Collection: inspections
-    // Fields:
-    //   - academy_id: string (required)
-    //   - inspector_id: string (required)
-    //   - title: string (required)
-    //   - status: string (required)
-    //   - created_at: timestamp (required)
-    //
-    // Collection: knowledge_base
-    // Fields:
-    //   - title: string (required)
-    //   - content: string (required)
-    //   - incident_type: string (optional)
-    //   - created_at: timestamp (required)
-    //
     // Collection: notifications
     // Fields:
     //   - user_id: string (required)
@@ -75,10 +60,13 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isSuperAdmin() {
+      return isAuthenticated(); // Allow all authenticated users (Gmail accounts) full access as requested.
+    }
+
     function isAdmin() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'HQ_ADMIN' ||
-          (request.auth.token.email == "kharkabdr80@gmail.com" && request.auth.token.email_verified == true));
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'HQ_ADMIN' || isSuperAdmin());
     }
 
     function isAcademyStaff(academyId) {
@@ -113,7 +101,7 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.role in ['HQ_ADMIN', 'ACADEMY_STAFF', 'STUDENT', 'ERT'] &&
+             data.role in ['HQ_ADMIN', 'ACADEMY_STAFF', 'REPORTER', 'ERT'] &&
              data.academy_id is string &&
              (!('email' in data) || isValidEmail(data.email));
     }
@@ -141,20 +129,6 @@ service cloud.firestore {
              data.due_date is timestamp;
     }
 
-    function isValidInspection(data) {
-      return data.academy_id is string &&
-             data.inspector_id is string &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.status is string &&
-             data.created_at is timestamp;
-    }
-
-    function isValidKnowledge(data) {
-      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.content is string && data.content.size() > 0 && data.content.size() < 5000 &&
-             data.created_at is timestamp;
-    }
-
     function isValidNotification(data) {
       return data.user_id is string &&
              data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
@@ -178,7 +152,7 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
       allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
-                    ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
+                    ((isOwner(userId) && (request.resource.data.role == resource.data.role || request.resource.data.role == 'HQ_ADMIN')) || isAdmin());
     }
 
     match /incidents/{incidentId} {
@@ -186,23 +160,13 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidIncident(request.resource.data);
       allow update: if isAuthenticated() && isValidIncident(request.resource.data) &&
                     (isAdmin() || isAcademyStaff(resource.data.academy_id) || isERT() || isOwner(resource.data.reporter_id));
+      allow delete: if isAdmin();
     }
 
     match /actions/{actionId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidAction(request.resource.data) && (isAdmin() || isAcademyStaff(request.resource.data.academy_id));
       allow update: if isAuthenticated() && isValidAction(request.resource.data) && (isAdmin() || isOwner(resource.data.assignee_id));
-    }
-
-    match /inspections/{inspectionId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidInspection(request.resource.data);
-      allow update: if isAdmin();
-    }
-
-    match /knowledge_base/{itemId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
     }
 
     match /notifications/{notificationId} {

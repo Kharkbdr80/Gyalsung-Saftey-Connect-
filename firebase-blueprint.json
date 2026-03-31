@@ -27,7 +27,7 @@
         },
         "role": {
           "type": "string",
-          "enum": ["HQ_ADMIN", "ACADEMY_STAFF", "STUDENT", "ERT"],
+          "enum": ["HQ_ADMIN", "ACADEMY_STAFF", "REPORTER", "ERT"],
           "description": "Role of the user in the system"
         },
         "academy_id": {
@@ -135,60 +135,6 @@
         }
       },
       "required": ["incident_id", "assignee_id", "description", "status", "due_date"]
-    },
-    "Inspection": {
-      "title": "Inspection",
-      "description": "A safety inspection record",
-      "type": "object",
-      "properties": {
-        "academy_id": {
-          "type": "string",
-          "description": "ID of the academy inspected"
-        },
-        "inspector_id": {
-          "type": "string",
-          "description": "ID of the user who performed the inspection"
-        },
-        "title": {
-          "type": "string",
-          "description": "Title of the inspection"
-        },
-        "status": {
-          "type": "string",
-          "description": "Status of the inspection"
-        },
-        "created_at": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Timestamp when the inspection was performed"
-        }
-      },
-      "required": ["academy_id", "inspector_id", "title", "status", "created_at"]
-    },
-    "KnowledgeItem": {
-      "title": "KnowledgeItem",
-      "description": "An item in the safety knowledge base",
-      "type": "object",
-      "properties": {
-        "title": {
-          "type": "string",
-          "description": "Title of the knowledge item"
-        },
-        "content": {
-          "type": "string",
-          "description": "Content of the knowledge item"
-        },
-        "incident_type": {
-          "type": "string",
-          "description": "Related incident type"
-        },
-        "created_at": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Timestamp when the item was created"
-        }
-      },
-      "required": ["title", "content", "created_at"]
     }
   },
   "firestore": {
@@ -207,14 +153,6 @@
     "/actions": {
       "schema": "Action",
       "description": "Collection of follow-up actions"
-    },
-    "/inspections": {
-      "schema": "Inspection",
-      "description": "Collection of safety inspections"
-    },
-    "/knowledge_base": {
-      "schema": "KnowledgeItem",
-      "description": "Collection of knowledge base items"
     }
   }
 }

@@ -1,4 +1,4 @@
-export type Role = 'HQ_ADMIN' | 'ACADEMY_STAFF' | 'STUDENT' | 'ERT';
+export type Role = 'HQ_ADMIN' | 'ACADEMY_STAFF' | 'REPORTER' | 'ERT';
 
 export interface Academy {
   id: string;
@@ -42,25 +42,6 @@ export interface Action {
   status: 'Pending' | 'Completed';
   due_date: string;
   completed_at?: string;
-}
-
-export interface Inspection {
-  id: string;
-  academy_id: string;
-  academy_name: string;
-  inspector_id: string;
-  inspector_name: string;
-  title: string;
-  status: string;
-  created_at: string;
-}
-
-export interface KnowledgeItem {
-  id: string;
-  title: string;
-  content: string;
-  incident_type: string;
-  created_at: string;
 }
 
 export interface Notification {

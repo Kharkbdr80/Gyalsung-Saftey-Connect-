@@ -2,11 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   Shield, 
   AlertTriangle, 
-  FileText, 
   CheckSquare, 
   BarChart3, 
   Bell, 
-  BookOpen, 
   Menu, 
   X,
   Plus,
@@ -25,7 +23,8 @@ import {
   RefreshCw,
   LogIn,
   Settings,
-  ShieldAlert
+  ShieldAlert,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -42,7 +41,7 @@ import {
 } from 'recharts';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
-import { User, Incident, Academy, Action, Inspection, KnowledgeItem, Role, Notification } from './types';
+import { User, Incident, Academy, Action, Role, Notification } from './types';
 import { 
   auth, 
   db, 
@@ -128,6 +127,8 @@ const compressImage = (base64Str: string, maxWidth = 800, maxHeight = 800, quali
   });
 };
 
+// SUPER_ADMIN_EMAIL constant removed to allow all HQ_ADMIN users full access.
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -136,8 +137,6 @@ export default function App() {
   const [academies, setAcademies] = useState<Academy[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
-  const [inspections, setInspections] = useState<Inspection[]>([]);
-  const [knowledge, setKnowledge] = useState<KnowledgeItem[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -149,76 +148,232 @@ export default function App() {
   const [showSyncToast, setShowSyncToast] = useState(false);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [incidentToDelete, setIncidentToDelete] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isGoogleConnected, setIsGoogleConnected] = useState(false);
+  const [isGoogleConfigured, setIsGoogleConfigured] = useState(true);
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState(false);
+  const [redirectUri, setRedirectUri] = useState('');
+
+  // Check Google Connection Status
+  useEffect(() => {
+    fetch('/api/health')
+      .then(res => res.json())
+      .then(data => {
+        setIsGoogleConfigured(data.googleConfigured);
+        setRedirectUri(data.redirectUri);
+      })
+      .catch(err => console.error("Error checking health:", err));
+
+    if (currentUser) {
+      fetch(`/api/auth/google/status?userId=${currentUser.id}`)
+        .then(res => res.json())
+        .then(data => {
+          setIsGoogleConnected(data.connected);
+          setIsAutoSyncEnabled(data.autoSync);
+        })
+        .catch(err => console.error("Error checking Google status:", err));
+    }
+  }, [currentUser]);
+
+  const handleToggleAutoSync = async () => {
+    if (!currentUser) return;
+    const newValue = !isAutoSyncEnabled;
+    setIsAutoSyncEnabled(newValue);
+    
+    try {
+      await fetch('/api/auth/google/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          autoSync: newValue
+        })
+      });
+    } catch (err) {
+      console.error("Toggle sync error:", err);
+      setIsAutoSyncEnabled(!newValue); // Rollback
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    if (!isGoogleConfigured) {
+      alert("Google Sheets integration is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the app secrets.");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/auth/google/url?userId=${currentUser?.id}`);
+      const data = await res.json();
+      
+      if (data.error) {
+        alert("Error: " + data.error);
+        return;
+      }
+
+      const authWindow = window.open(data.url, 'google_auth', 'width=600,height=700');
+      
+      if (!authWindow) {
+        alert("Popup blocked! Please allow popups for this site to connect your account.");
+        return;
+      }
+      
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+          setIsGoogleConnected(true);
+          window.removeEventListener('message', handleMessage);
+        }
+      };
+      window.addEventListener('message', handleMessage);
+    } catch (err) {
+      console.error("Auth error:", err);
+      alert("Failed to connect. Please check your internet connection and try again.");
+    }
+  };
+
+  const handleGoogleDisconnect = async () => {
+    if (!currentUser) return;
+    if (!confirm("Are you sure you want to disconnect your Google account? This will stop automatic exports.")) return;
+    
+    try {
+      const res = await fetch(`/api/auth/google/disconnect?userId=${currentUser.id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setIsGoogleConnected(false);
+      }
+    } catch (err) {
+      console.error("Disconnect error:", err);
+    }
+  };
+
+  const handleExportToSheets = async () => {
+    if (!isGoogleConnected) {
+      handleGoogleAuth();
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const res = await fetch('/api/incidents/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser?.id,
+          incidents: incidents
+        })
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, '_blank');
+      } else {
+        alert("Export failed: " + (data.error || "Unknown error"));
+      }
+    } catch (err) {
+      console.error("Export error:", err);
+      alert("Export failed. Please try again.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        // Check if user exists in Firestore
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          
-          // Ensure admin role is up to date for the specific admin email
-          if (firebaseUser.email === 'kharkabdr80@gmail.com' && userData.role !== 'HQ_ADMIN') {
-            await updateDoc(doc(db, 'users', firebaseUser.uid), { role: 'HQ_ADMIN' });
-            userData.role = 'HQ_ADMIN';
-          }
-
-          // Migration for legacy academy_id '6' or empty
-          if (userData.academy_id === '6' || !userData.academy_id || userData.academy_id.trim() === '') {
-            const academiesSnap = await getDocs(collection(db, 'academies'));
-            const ghq = academiesSnap.docs.find(d => d.data().name === 'GHQ');
-            if (ghq) {
-              await updateDoc(doc(db, 'users', firebaseUser.uid), { academy_id: ghq.id });
-              userData.academy_id = ghq.id;
+      try {
+        if (firebaseUser) {
+          // Check if user exists in Firestore
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            
+            // Ensure all users are HQ_ADMIN so they can view everything like an admin
+            if (userData.role !== 'HQ_ADMIN') {
+              try {
+                await updateDoc(doc(db, 'users', firebaseUser.uid), { role: 'HQ_ADMIN' });
+                userData.role = 'HQ_ADMIN';
+              } catch (err) {
+                console.error("Failed to upgrade user role:", err);
+              }
             }
-          }
-          
-          // Fetch academy name for the user
-          let academyName = 'Unknown Unit';
-          if (userData.academy_id && userData.academy_id.trim() !== '') {
+
+            // Migration for legacy academy_id '6' or empty
+            if (userData.academy_id === '6' || !userData.academy_id || userData.academy_id.trim() === '') {
+              try {
+                const academiesSnap = await getDocs(collection(db, 'academies'));
+                const ghq = academiesSnap.docs.find(d => d.data().name === 'GHQ');
+                if (ghq) {
+                  await updateDoc(doc(db, 'users', firebaseUser.uid), { academy_id: ghq.id });
+                  userData.academy_id = ghq.id;
+                }
+              } catch (err) {
+                console.error("Failed to migrate academy_id:", err);
+              }
+            }
+            
+            // Fetch academy name for the user
+            let academyName = 'Unknown Unit';
+            if (userData.academy_id && userData.academy_id.trim() !== '') {
+              try {
+                const academyDoc = await getDoc(doc(db, 'academies', userData.academy_id));
+                if (academyDoc.exists()) {
+                  academyName = academyDoc.data().name;
+                }
+              } catch (err) {
+                console.error("Error fetching academy name:", err);
+              }
+            }
+            
+            const userDataFull = { id: firebaseUser.uid, ...userData, academy_name: academyName } as any;
+            setCurrentUser(userDataFull);
+            
+            // Set default tab based on role
+            setActiveTab('dashboard');
+          } else {
+            // Find GHQ academy ID for default
+            let ghqId = '';
+            let ghqName = 'Unknown Unit';
             try {
-              const academyDoc = await getDoc(doc(db, 'academies', userData.academy_id));
-              if (academyDoc.exists()) {
-                academyName = academyDoc.data().name;
+              const academiesSnap = await getDocs(collection(db, 'academies'));
+              const ghq = academiesSnap.docs.find(d => d.data().name === 'GHQ');
+              if (ghq) {
+                ghqId = ghq.id;
+                ghqName = ghq.data().name;
               }
             } catch (err) {
-              console.error("Error fetching academy name:", err);
+              console.error("Failed to fetch academies for new user:", err);
             }
+            
+            // New user - default to REPORTER role for safety
+            const newUser: any = {
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous User',
+              role: 'REPORTER',
+              academy_id: ghqId, 
+              email: firebaseUser.email || '',
+              created_at: Timestamp.now()
+            };
+            try {
+              await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+            } catch (err) {
+              console.error("Failed to create new user doc:", err);
+            }
+            const newUserFull = { id: firebaseUser.uid, ...newUser, academy_name: ghqName };
+            setCurrentUser(newUserFull);
+            
+            // Set default tab based on role
+            setActiveTab('dashboard');
           }
-          
-          const userDataFull = { id: firebaseUser.uid, ...userData, academy_name: academyName } as any;
-          setCurrentUser(userDataFull);
-          
-          // Set default tab based on role
-          setActiveTab('dashboard');
         } else {
-          // Find GHQ academy ID for default
-          const academiesSnap = await getDocs(collection(db, 'academies'));
-          const ghq = academiesSnap.docs.find(d => d.data().name === 'GHQ');
-          
-          // New user - default to STUDENT role for safety
-          const newUser: any = {
-            name: firebaseUser.displayName || 'Anonymous User',
-            role: firebaseUser.email === 'kharkabdr80@gmail.com' ? 'HQ_ADMIN' : 'STUDENT',
-            academy_id: ghq ? ghq.id : '', 
-            email: firebaseUser.email,
-            created_at: Timestamp.now()
-          };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-          const newUserFull = { id: firebaseUser.uid, ...newUser, academy_name: ghq ? ghq.data().name : 'Unknown Unit' };
-          setCurrentUser(newUserFull);
-          
-          // Set default tab based on role
-          setActiveTab('dashboard');
+          setCurrentUser(null);
         }
-      } else {
-        setCurrentUser(null);
+      } catch (err) {
+        console.error("Auth listener error:", err);
+      } finally {
+        setAuthReady(true);
       }
-      setAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
@@ -351,30 +506,6 @@ export default function App() {
       setActions(data);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'actions'));
 
-    const unsubInspections = onSnapshot(collection(db, 'inspections'), (snapshot) => {
-      const data = snapshot.docs.map(doc => {
-        const d = doc.data();
-        return { 
-          id: doc.id, 
-          ...d, 
-          created_at: d.created_at?.toDate?.()?.toISOString() || new Date().toISOString() 
-        } as any;
-      });
-      setInspections(data);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'inspections'));
-
-    const unsubKnowledge = onSnapshot(collection(db, 'knowledge_base'), (snapshot) => {
-      const data = snapshot.docs.map(doc => {
-        const d = doc.data();
-        return { 
-          id: doc.id, 
-          ...d, 
-          created_at: d.created_at?.toDate?.()?.toISOString() || new Date().toISOString() 
-        } as any;
-      });
-      setKnowledge(data);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'knowledge_base'));
-
     const unsubNotifications = onSnapshot(
       query(collection(db, 'notifications'), where('user_id', '==', currentUser.id), orderBy('created_at', 'desc')),
       (snapshot) => {
@@ -396,8 +527,6 @@ export default function App() {
       unsubUsers();
       unsubIncidents();
       unsubActions();
-      unsubInspections();
-      unsubKnowledge();
       unsubNotifications();
     };
   }, [currentUser]);
@@ -500,6 +629,23 @@ export default function App() {
     }
   };
 
+  const syncIncidentToGoogle = async (incident: any) => {
+    if (!currentUser || !isGoogleConnected || !isAutoSyncEnabled) return;
+    
+    try {
+      await fetch('/api/incidents/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          incident
+        })
+      });
+    } catch (err) {
+      console.error("Auto-sync failed:", err);
+    }
+  };
+
   const handleReportIncident = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!currentUser) return;
@@ -534,7 +680,11 @@ export default function App() {
         updated_at: serverTimestamp()
       };
 
-      await addDoc(collection(db, 'incidents'), data);
+      const docRef = await addDoc(collection(db, 'incidents'), data);
+      
+      // Auto-sync to Google Sheets if enabled
+      syncIncidentToGoogle({ ...data, id: docRef.id });
+
       setShowReportModal(false);
       setPhotoBase64(null);
     } catch (err) {
@@ -553,6 +703,9 @@ export default function App() {
       });
 
       if (incident) {
+        const updatedIncident = { ...incident, status };
+        syncIncidentToGoogle(updatedIncident);
+
         // Create notification for the reporter
         await addDoc(collection(db, 'notifications'), {
           user_id: incident.reporter_id,
@@ -569,6 +722,16 @@ export default function App() {
     }
   };
 
+  const deleteIncident = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'incidents', id));
+      setIncidentToDelete(null);
+      setShowDeleteConfirm(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'incidents');
+    }
+  };
+
   const updateGARecommendation = async (id: string, recommendation: string) => {
     try {
       const incident = incidents.find(i => i.id === id);
@@ -578,6 +741,9 @@ export default function App() {
       });
 
       if (incident) {
+        const updatedIncident = { ...incident, ga_recommendation: recommendation };
+        syncIncidentToGoogle(updatedIncident);
+
         // Create notification for the reporter
         await addDoc(collection(db, 'notifications'), {
           user_id: incident.reporter_id,
@@ -603,6 +769,9 @@ export default function App() {
       });
 
       if (incident) {
+        const updatedIncident = { ...incident, ghq_recommendation: recommendation };
+        syncIncidentToGoogle(updatedIncident);
+
         // Create notification for the reporter
         await addDoc(collection(db, 'notifications'), {
           user_id: incident.reporter_id,
@@ -651,6 +820,24 @@ export default function App() {
     }
   };
 
+  const handleDeleteIncident = async (id: string) => {
+    if (!currentUser || currentUser.role !== 'HQ_ADMIN') {
+      alert("Only administrators can delete incidents.");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await deleteDoc(doc(db, 'incidents', id));
+      setShowDetailModal(false);
+      setSelectedIncident(null);
+      setIsDeleting(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `incidents/${id}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   if (!authReady) return <div className="h-screen flex items-center justify-center font-sans">Loading...</div>;
 
   if (!currentUser) {
@@ -688,13 +875,12 @@ export default function App() {
   }
 
   const navItems = [
-    { id: 'dashboard', label: currentUser?.role === 'STUDENT' ? 'Report' : 'Dashboard', icon: currentUser?.role === 'STUDENT' ? Plus : BarChart3, roles: ['HQ_ADMIN', 'ACADEMY_STAFF', 'STUDENT'] },
+    { id: 'dashboard', label: currentUser?.role === 'REPORTER' ? 'Report' : 'Dashboard', icon: currentUser?.role === 'REPORTER' ? Plus : BarChart3, roles: ['HQ_ADMIN', 'ACADEMY_STAFF', 'REPORTER'] },
     { id: 'report', label: 'Report Incident', icon: Plus, roles: ['HQ_ADMIN', 'ACADEMY_STAFF', 'ERT'], isAction: true },
     { id: 'incidents', label: 'Incidents', icon: AlertTriangle, roles: ['HQ_ADMIN', 'ACADEMY_STAFF', 'ERT'] },
     { id: 'actions', label: 'Actions', icon: CheckSquare, roles: ['HQ_ADMIN', 'ACADEMY_STAFF', 'ERT'] },
-    { id: 'inspections', label: 'Inspections', icon: FileText, roles: ['HQ_ADMIN', 'ACADEMY_STAFF'] },
-    { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, roles: ['HQ_ADMIN', 'ACADEMY_STAFF', 'STUDENT'] },
-    { id: 'settings', label: 'Settings', icon: Settings, roles: ['HQ_ADMIN', 'ACADEMY_STAFF', 'STUDENT', 'ERT'] },
+    { id: 'incident_log', label: 'Detailed Log', icon: BarChart3, roles: ['HQ_ADMIN', 'ACADEMY_STAFF'] },
+    { id: 'settings', label: 'Settings', icon: Settings, roles: ['HQ_ADMIN', 'ACADEMY_STAFF', 'REPORTER', 'ERT'] },
   ];
 
   const filteredNav = navItems.filter(item => item.roles.includes(currentUser.role));
@@ -750,7 +936,12 @@ export default function App() {
                     : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
               )}
             >
-              <item.icon size={20} />
+              <div className="relative">
+                <item.icon size={20} />
+                {item.id === 'settings' && !isGoogleConnected && isGoogleConfigured && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full border border-white"></span>
+                )}
+              </div>
               {item.label}
             </button>
           ))}
@@ -799,7 +990,7 @@ export default function App() {
                 />
               )}
               <h2 className="text-lg font-semibold capitalize">
-                {activeTab === 'dashboard' && currentUser?.role === 'STUDENT' ? 'Report' : activeTab.replace('-', ' ')}
+                {activeTab === 'dashboard' && currentUser?.role === 'REPORTER' ? 'Report' : activeTab.replace('-', ' ')}
               </h2>
             </div>
           </div>
@@ -817,17 +1008,6 @@ export default function App() {
               </div>
               <p className="text-[10px] text-slate-500">Updated {format(lastUpdated, 'HH:mm:ss')}</p>
             </div>
-            <button 
-              onClick={() => window.location.reload()}
-              disabled={isSyncing}
-              className={cn(
-                "p-2 text-slate-500 hover:bg-slate-50 rounded-full transition-all duration-500",
-                isSyncing ? "animate-spin text-indigo-600" : "active:rotate-180"
-              )}
-              title="Refresh Page"
-            >
-              <RefreshCw size={20} />
-            </button>
             <button 
               onClick={() => setShowNotifications(!showNotifications)}
               className="p-2 text-slate-500 hover:bg-slate-50 rounded-full relative"
@@ -853,7 +1033,7 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-6"
               >
-                {currentUser?.role === 'STUDENT' ? (
+                {currentUser?.role === 'REPORTER' ? (
                   <div className="max-w-2xl mx-auto relative">
                     <Card className="p-8 relative overflow-hidden">
                       <div className="absolute inset-0 flex items-center justify-center opacity-[0.05] pointer-events-none select-none">
@@ -953,6 +1133,13 @@ export default function App() {
                 </div>
                 ) : (
                   <>
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                      <div>
+                        <h3 className="text-2xl font-bold text-slate-900">Safety Dashboard</h3>
+                        <p className="text-sm text-slate-500">Real-time monitoring and analytics</p>
+                      </div>
+                    </div>
+
                     {/* Stats Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <Card className="p-6">
@@ -978,13 +1165,6 @@ export default function App() {
                       <Badge variant="warning">Pending</Badge>
                     </div>
                   </Card>
-                  <Card className="p-6">
-                    <p className="text-sm font-medium text-slate-500">Inspections</p>
-                    <div className="mt-2 flex items-end justify-between">
-                      <h3 className="text-3xl font-bold">{inspections.length}</h3>
-                      <Badge variant="default">Completed</Badge>
-                    </div>
-                  </Card>
                 </div>
 
                 {/* Charts */}
@@ -996,7 +1176,7 @@ export default function App() {
                         <BarChart data={stats?.byAcademy || []}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                           <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} allowDecimals={false} />
                           <Tooltip 
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                           />
@@ -1190,13 +1370,28 @@ export default function App() {
                               </div>
                               <h4 className="text-lg font-bold text-slate-900">{incident.location}</h4>
                             </div>
-                            <div className="text-right">
-                              <p className="text-xs text-slate-500 flex items-center justify-end gap-1">
-                                <Clock size={12} />
-                                {format(new Date(incident.updated_at), 'MMM d, HH:mm')}
-                              </p>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mt-0.5">Last Updated</p>
-                              <p className="text-xs font-medium text-slate-400 mt-1">Reported by: {incident.reporter_name}</p>
+                            <div className="flex items-start gap-2">
+                              <div className="text-right">
+                                <p className="text-xs text-slate-500 flex items-center justify-end gap-1">
+                                  <Clock size={12} />
+                                  {format(new Date(incident.updated_at), 'MMM d, HH:mm')}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mt-0.5">Last Updated</p>
+                                <p className="text-xs font-medium text-slate-400 mt-1">Reported by: {incident.reporter_name}</p>
+                              </div>
+                              {currentUser.role === 'HQ_ADMIN' && (
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIncidentToDelete(incident.id);
+                                    setShowDeleteConfirm(true);
+                                  }}
+                                  className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                                  title="Delete Incident"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              )}
                             </div>
                           </div>
                           <p className="text-sm text-slate-600 leading-relaxed mb-4">{incident.description}</p>
@@ -1328,62 +1523,105 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === 'inspections' && (
+            {activeTab === 'incident_log' && (
               <motion.div
-                key="inspections"
+                key="incident_log"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
                 className="space-y-6"
               >
-                <div className="grid grid-cols-1 gap-4">
-                  {inspections.map((insp) => (
-                    <Card key={insp.id} className="p-6 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
-                          <CheckSquare size={24} />
-                        </div>
-                        <div>
-                          <h5 className="font-bold text-slate-900">{insp.title}</h5>
-                          <p className="text-xs text-slate-500 font-medium uppercase">{insp.academy_name} • {insp.inspector_name}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-6">
-                        <div className="text-right hidden sm:block">
-                          <p className="text-sm font-semibold text-emerald-600">Pass</p>
-                          <p className="text-xs text-slate-400">{format(new Date(insp.created_at), 'MMM d, yyyy')}</p>
-                        </div>
-                        <button className="p-2 text-slate-400 hover:text-indigo-600">
-                          <ChevronRight size={20} />
-                        </button>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-
-            {activeTab === 'knowledge' && (
-              <motion.div
-                key="knowledge"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="grid grid-cols-1 md:grid-cols-2 gap-6"
-              >
-                {knowledge.map((item) => (
-                  <Card key={item.id} className="p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Badge variant="info">{item.incident_type}</Badge>
-                      <span className="text-xs text-slate-400">{format(new Date(item.created_at), 'MMM d, yyyy')}</span>
-                    </div>
-                    <h5 className="text-lg font-bold text-slate-900 mb-3">{item.title}</h5>
-                    <p className="text-sm text-slate-600 leading-relaxed mb-4">{item.content}</p>
-                    <button className="text-sm font-bold text-indigo-600 flex items-center gap-1 hover:gap-2 transition-all">
-                      Read Full SOP <ChevronRight size={16} />
-                    </button>
-                  </Card>
-                ))}
+                <Card>
+                  <div className="p-6 border-b border-black/5 flex items-center justify-between">
+                    <h4 className="font-bold text-lg">Detailed Incident Log</h4>
+                    <Badge variant="info">{incidents.length} Records</Badge>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-black/5">
+                          <th className="px-6 py-4 whitespace-nowrap">ID</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Date & Time</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Unit</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Reporter</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Type</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Severity</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Location</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Description</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Immediate Action</th>
+                          <th className="px-6 py-4 whitespace-nowrap">GA Rec</th>
+                          <th className="px-6 py-4 whitespace-nowrap">GHQ Rec</th>
+                          <th className="px-6 py-4 whitespace-nowrap">Status</th>
+                          <th className="px-6 py-4 whitespace-nowrap text-center">Delete</th>
+                          <th className="px-6 py-4 whitespace-nowrap text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black/5">
+                        {incidents.map((incident) => (
+                          <tr key={incident.id} className="hover:bg-slate-50 transition-colors text-xs">
+                            <td className="px-6 py-4 font-mono text-[10px] text-slate-400">#{incident.id.slice(-6)}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-slate-600">{format(new Date(incident.created_at), 'yyyy-MM-dd HH:mm')}</td>
+                            <td className="px-6 py-4 whitespace-nowrap font-bold text-slate-900">{incident.academy_name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-slate-600">{incident.reporter_name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <Badge variant="default" className="bg-slate-100 text-slate-600">{incident.type}</Badge>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <Badge variant={incident.severity === 'Critical' ? 'error' : incident.severity === 'High' ? 'warning' : 'info'}>
+                                {incident.severity}
+                              </Badge>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-slate-600">{incident.location}</td>
+                            <td className="px-6 py-4 min-w-[200px] max-w-xs truncate text-slate-600" title={incident.description}>
+                              {incident.description}
+                            </td>
+                            <td className="px-6 py-4 min-w-[200px] max-w-xs truncate text-slate-600 italic" title={incident.immediate_action}>
+                              {incident.immediate_action}
+                            </td>
+                            <td className="px-6 py-4 min-w-[150px] max-w-xs truncate text-slate-600" title={incident.ga_recommendation}>
+                              {incident.ga_recommendation || '-'}
+                            </td>
+                            <td className="px-6 py-4 min-w-[150px] max-w-xs truncate text-slate-600" title={incident.ghq_recommendation}>
+                              {incident.ghq_recommendation || '-'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={cn(
+                                "px-2 py-1 rounded-lg font-bold text-[10px] uppercase tracking-tighter",
+                                incident.status === 'Resolved' ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                              )}>
+                                {incident.status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-center">
+                              <button 
+                                onClick={() => {
+                                  setIncidentToDelete(incident.id);
+                                  setShowDeleteConfirm(true);
+                                }}
+                                className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                title="Delete Incident"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right">
+                              <button 
+                                onClick={() => {
+                                  setSelectedIncident(incident);
+                                  setShowDetailModal(true);
+                                }}
+                                className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                title="View Details"
+                              >
+                                <ChevronRight size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
               </motion.div>
             )}
 
@@ -1488,9 +1726,24 @@ export default function App() {
                   </div>
                   <h3 className="text-xl font-bold text-slate-900">Incident Details</h3>
                 </div>
-                <button onClick={() => setShowDetailModal(false)} className="p-2 text-slate-400 hover:bg-white rounded-full transition-colors">
-                  <X size={24} />
-                </button>
+                <div className="flex items-center gap-2">
+                  {currentUser.role === 'HQ_ADMIN' && (
+                    <button 
+                      onClick={() => {
+                        setIncidentToDelete(selectedIncident.id);
+                        setShowDeleteConfirm(true);
+                      }}
+                      className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all flex items-center gap-2"
+                      title="Delete Incident"
+                    >
+                      <Trash2 size={20} />
+                      <span className="text-xs font-bold uppercase tracking-wider hidden sm:inline">Delete</span>
+                    </button>
+                  )}
+                  <button onClick={() => setShowDetailModal(false)} className="p-2 text-slate-400 hover:bg-white rounded-full transition-colors">
+                    <X size={24} />
+                  </button>
+                </div>
               </div>
 
               <div className="p-8 space-y-6 overflow-y-auto max-h-[75vh]">
@@ -1573,9 +1826,42 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="p-6 border-t border-black/5 bg-slate-50 flex justify-end">
+              <div className="p-6 border-t border-black/5 bg-slate-50 flex justify-between items-center">
+                <div>
+                  {currentUser.role === 'HQ_ADMIN' && (
+                    !isDeleting ? (
+                      <button 
+                        onClick={() => setIsDeleting(true)}
+                        className="flex items-center gap-2 px-4 py-2 text-rose-600 font-bold hover:bg-rose-50 rounded-xl transition-all"
+                      >
+                        <Trash2 size={18} />
+                        Delete Incident
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <p className="text-xs font-bold text-rose-600">Are you sure?</p>
+                        <button 
+                          onClick={() => handleDeleteIncident(selectedIncident.id)}
+                          disabled={isSubmitting}
+                          className="px-3 py-1 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700 disabled:opacity-50"
+                        >
+                          {isSubmitting ? 'Deleting...' : 'Yes, Delete'}
+                        </button>
+                        <button 
+                          onClick={() => setIsDeleting(false)}
+                          className="px-3 py-1 bg-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-300"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
                 <button 
-                  onClick={() => setShowDetailModal(false)}
+                  onClick={() => {
+                    setShowDetailModal(false);
+                    setIsDeleting(false);
+                  }}
                   className="px-6 py-2 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all"
                 >
                   Close Details
@@ -1796,6 +2082,45 @@ export default function App() {
               </form>
             </div>
           </motion.div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowDeleteConfirm(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden p-8 text-center"
+            >
+              <div className="w-20 h-20 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Trash2 size={40} />
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-2">Delete Incident?</h3>
+              <p className="text-slate-500 mb-8">This action cannot be undone. All data associated with this incident will be permanently removed.</p>
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => incidentToDelete && deleteIncident(incidentToDelete)}
+                  className="flex-1 py-3 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-200"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
 
